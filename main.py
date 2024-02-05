@@ -25,21 +25,30 @@ def ensure_cloudwatch_log_stream_exists(client, log_group_name, log_stream_name)
 
 def run_docker_container(docker_image, bash_command):
     client = DockerClient.from_env()
-    container = client.containers.run(docker_image, command=bash_command, detach=True)
+    container = client.containers.run(docker_image, command=['bash', '-c', bash_command], detach=True)
     return container
 
 def monitor_container_logs(container, cloudwatch_client, log_group_name, log_stream_name):
+    next_token = None
     for line in container.logs(stream=True):
-        cloudwatch_client.put_log_events(
-            logGroupName=log_group_name,
-            logStreamName=log_stream_name,
-            logEvents=[
-                {
-                    'timestamp': int(time.time() * 1000),
-                    'message': line.decode('utf-8')
-                },
-            ],
-        )
+        event = {
+            'timestamp': int(time.time() * 1000),
+            'message': line.decode('utf-8')
+        }
+        if next_token:
+            response = cloudwatch_client.put_log_events(
+                logGroupName=log_group_name,
+                logStreamName=log_stream_name,
+                logEvents=[event],
+                sequenceToken=next_token
+            )
+        else:
+            response = cloudwatch_client.put_log_events(
+                logGroupName=log_group_name,
+                logStreamName=log_stream_name,
+                logEvents=[event]
+            )
+        next_token = response.get('nextSequenceToken')
 
 def main():
     parser = argparse.ArgumentParser(description="Run a Docker container and stream logs to AWS CloudWatch.")
@@ -65,4 +74,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
